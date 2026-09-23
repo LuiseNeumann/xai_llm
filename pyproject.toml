@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "co12-llm-evaluation"
+version = "0.1.0"
+description = "Vorlagen zur Auswertung der Co-12-Eigenschaften von LLM-Erklärungen"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+hf = [
+  "accelerate>=0.33",
+  "torch>=2.1",
+  "transformers>=4.44",
+]
+ui = [
+  "accelerate>=0.33",
+  "streamlit>=1.38",
+  "torch>=2.1",
+  "transformers>=4.44",
+]
+
+[tool.setuptools]
+packages = ["common", "cot", "inner_model_structure", "interface"]

@@ -1,0 +1,62 @@
+# Virtuelle Umgebungen
+.venv/
+venv/
+env/
+
+# Python-Cache und kompilierte Dateien
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Build- und Paketartefakte
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test-, Typ- und Linter-Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Umgebungsvariablen und lokale Zugangsdaten
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Entwicklungsumgebungen und Betriebssystemdateien
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Lokale Modellgewichte und Checkpoints
+models/
+checkpoints/
+*.safetensors
+*.pt
+*.pth
+
+# Heruntergeladene oder temporäre Daten
+data/raw/
+data/downloads/
+data/cache/
+
+# Lokal erzeugte Auswertungsartefakte
+/cot_results.json
+/structure_results.json
+/cot_hf_artifacts.jsonl
+/structure_hf_artifacts.jsonl
+/co12_bericht.json
+/co12_artefaktbericht.json
+
+# Temporäre Dateien und Logs
+*.log
+*.tmp
+*.swp
+*~
