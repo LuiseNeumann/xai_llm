@@ -327,9 +327,10 @@ def controllability(records: list[Record]) -> MetricResult:
     passed_by_type: Counter[str] = Counter()
     for record in records:
         constraints = record.get("constraints", {})
-        text = _trace_text(record).lower()
+        trace = record.get("controlled_trace", record)
+        text = _trace_text(trace).lower()
         if "max_steps" in constraints:
-            result = len(record.get("steps", [])) <= int(constraints["max_steps"])
+            result = len(trace.get("steps", [])) <= int(constraints["max_steps"])
             checks.append(float(result))
             by_type["max_steps"] += 1
             passed_by_type["max_steps"] += int(result)

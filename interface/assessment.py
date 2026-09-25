@@ -106,6 +106,8 @@ def metric_state(result: dict[str, Any]) -> str:
     """Ordnet einen Metrikwert einer verständlichen Qualitätsstufe zu."""
     if result.get("status") != "ok" or result.get("score") is None:
         return "nicht messbar"
+    if result.get("details", {}).get("assessment_eligible") is False:
+        return "diagnostischer Wert"
     if not result.get("higher_is_better", True):
         return "diagnostischer Wert"
     name = str(result.get("name", ""))
@@ -124,10 +126,13 @@ def build_assessment(
     answer_matches_reference: bool | None = None,
 ) -> Assessment:
     """Erstellt eine Ampel, ohne fehlende Evidenz als positiven Befund zu werten."""
-    available = [
+    measured = [
         result
         for result in metrics
         if result.get("status") == "ok" and result.get("score") is not None
+    ]
+    available = [
+        result for result in measured if result.get("details", {}).get("assessment_eligible") is not False
     ]
     coverage = len(available) / expected_metrics if expected_metrics else 0.0
     if coverage >= 0.75:
@@ -165,6 +170,10 @@ def build_assessment(
         recommendations.append("Referenzantworten, Gold-Schritte oder kontrafaktische Eingaben ergänzen.")
     elif coverage < 0.75:
         warnings.append("Die Evidenz deckt nur einen Teil der Co-12-Eigenschaften ab.")
+    if len(measured) > len(available):
+        warnings.append(
+            f"{len(measured) - len(available)} Werte sind nur diagnostische Proxys und fließen nicht in die Ampel ein."
+        )
 
     if critical_failure:
         color, label = "red", "Manuelle Prüfung erforderlich"
@@ -197,5 +206,6 @@ def interpret_metric(result: dict[str, Any]) -> str:
         return f"Nicht messbar: {reason}"
     score = result.get("score")
     if state == "diagnostischer Wert":
-        return f"Diagnostischer Rohwert: {score:.3f}. Dieser Wert besitzt keine universelle Gut/Schlecht-Schwelle."
+        reason = result.get("details", {}).get("assessment_reason", "Dieser Wert besitzt keine universelle Gut/Schlecht-Schwelle.")
+        return f"Diagnostischer Rohwert: {score:.3f}. {reason}"
     return f"Bewertung: {state}. Gemessener Wert: {score:.3f}."

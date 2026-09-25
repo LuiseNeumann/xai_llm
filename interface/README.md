@@ -7,19 +7,22 @@ eine Offline-Auswertung bereits gesammelter JSONL-Artefakte.
 ## Installation
 
 ```bash
-python3 -m pip install -e '.[ui]'
+uv sync --extra ui
 ```
 
 ## Start
 
 ```bash
-streamlit run interface/app.py
+lms load google/gemma-4-26b-a4b --gpu 0.6 -c 4096 -y
+lms server start
+uv run streamlit run interface/app.py
 ```
 
-Beim ersten Modelllauf lädt Hugging Face standardmäßig
-`Qwen/Qwen2.5-1.5B-Instruct` herunter. Das Modell wird mit
-`st.cache_resource` im Speicher gehalten und für weitere Prompts
-wiederverwendet.
+Das in LM Studio bereits heruntergeladene Modell heißt
+`google/gemma-4-26b-a4b`. Sein lokaler API-Server läuft standardmäßig auf
+`http://127.0.0.1:1234/v1`. Im UI kann auch `qwen3.8-27b` gewählt werden;
+das Modell muss dazu ebenfalls in LM Studio geladen sein. Die alternative
+Hugging-Face-Anbindung benötigt `uv sync --extra ui-hf`.
 
 ## Bedienung
 
@@ -30,6 +33,54 @@ wiederverwendet.
    ergänzen.
 5. `Antwort erzeugen und prüfen` auswählen.
 6. Ampel, Evidenzabdeckung und die zwölf aufklappbaren Einzelergebnisse prüfen.
+
+## Benchmark direkt in Streamlit starten
+
+Im Tab **Benchmark starten** zwischen den synthetischen Beispielaufgaben und
+**BBQ: Gender_identity (5.672)** wählen oder eine eigene JSONL-Datei im Schema
+aus `data/README.md` hochladen. Fehlt BBQ noch lokal, erscheint ein
+Downloadknopf. Für BBQ kann zwischen mehrdeutigen und eindeutigen Kontexten
+gefiltert und die Anzahl der Testfälle vor dem Start gewählt werden.
+Mit **Benchmark jetzt starten** werden die Modellantworten und Co-12-Werte
+berechnet. Accuracy, BBQ-Gruppenergebnisse nach Kontexttyp/Fragepolarität und
+Einzelfälle werden direkt angezeigt. Die Co-12-Ergebnisse sind in zwei
+getrennten Reitern **CoT · 12 Cs** und **Innere Modellstruktur · 12 Cs**
+aufklappbar – sowohl insgesamt als auch für jeden einzelnen Fall. Wenn keine
+Strukturartefakte vorliegen, werden alle zwölf Eigenschaften ausdrücklich
+als nicht messbar ausgewiesen.
+Innerhalb jedes C kann **Testverfahren und Datenlage aufklappen** geöffnet
+werden: Es beschreibt den konkreten Test, die Score-Berechnung, benötigte
+Messdaten, Einschränkungen und bei fehlendem Wert den Grund für diesen Lauf.
+Ergebnisse bleiben unter `data/results/` erhalten und können im Tab erneut
+ausgewählt werden.
+
+Alternativ denselben Ablauf im Terminal starten:
+
+```bash
+uv run python -m interface.run_benchmark --model google/gemma-4-26b-a4b
+```
+
+Für BBQ über das Terminal:
+
+```bash
+uv run python -m interface.download_bbq
+uv run python -m interface.run_benchmark --model google/gemma-4-26b-a4b --data data/downloads/bbq_gender_identity.jsonl --limit 20
+```
+
+Mit dem voreingestellten Hugging-Face-Modell statt LM Studio:
+
+```bash
+uv sync --extra ui-hf
+uv run python -m interface.run_benchmark --backend hf --model Qwen/Qwen2.5-1.5B-Instruct --device cuda --data data/downloads/bbq_gender_identity.jsonl --limit 10 --samples 1
+```
+
+Das vollständige BBQ-Subset umfasst 5.672 Fälle und erfordert entsprechend
+viele Modellaufrufe. Ein kleiner Testlauf über beispielsweise 4 oder 20 Fälle
+ist schneller, aber keine repräsentative Gesamtauswertung.
+
+Die mitgelieferten zwei Aufgaben sind synthetische Funktionsbeispiele, kein
+repräsentativer Qualitätsbenchmark. Eigene Fälle benötigen mindestens `id`,
+`prompt` und `expected_answer`.
 
 ## Schnellmodus
 
@@ -58,7 +109,8 @@ Eigenschaften erhöhen den Qualitätsstatus nicht.
 
 ## Datenschutz und Ressourcen
 
-Die Modellinferenz erfolgt lokal. Der erste Download kommt von Hugging Face.
-Die Strukturanalyse benötigt pro Layer zusätzliche Forward-Pässe und kann auf
-CPU entsprechend lange dauern. Für größere Modelle sollte eine CUDA-GPU oder
-eine angepasste Quantisierung verwendet werden.
+Die LM-Studio-Modellinferenz erfolgt lokal und nutzt das bereits vorhandene
+GGUF-Modell. LM Studio bietet über seine API keine internen Aktivierungen;
+Strukturmetriken sind deshalb dort nicht messbar. Bei Hugging Face benötigt
+die Strukturanalyse pro Layer zusätzliche Forward-Pässe und kann auf CPU
+entsprechend lange dauern.

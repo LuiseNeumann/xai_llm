@@ -9,7 +9,19 @@ from typing import Any
 
 import streamlit as st
 
+from common.io import read_jsonl
+from common.models import BenchmarkCase
 from interface.assessment import METRIC_INFO, interpret_metric, metric_state
+from interface.benchmark import (
+    load_benchmark,
+    missing_cot_evaluation,
+    missing_structure_evaluation,
+    run_benchmark,
+    save_benchmark,
+)
+from interface.bbq_dataset import BBQ_PATH, download_bbq
+from interface.lm_studio import DEFAULT_MODEL, DEFAULT_URL, LMStudioService, available_models
+from interface.method_explanations import explanation_for
 from interface.pipeline_service import (
     AnalysisConfig,
     AnalysisRequest,
@@ -96,11 +108,15 @@ st.markdown(
 
 @st.cache_resource(show_spinner=False)
 def load_model_service(
+    backend: str,
     model_name: str,
     max_new_tokens: int,
     device: str,
-) -> LocalModelService:
+    url: str,
+) -> LocalModelService | LMStudioService:
     """Lädt ein Modell einmalig und verwendet es über mehrere Anfragen hinweg."""
+    if backend == "LM Studio":
+        return LMStudioService(model_name, url, max_new_tokens)
     return LocalModelService(model_name, max_new_tokens=max_new_tokens, device=device)
 
 
@@ -164,7 +180,12 @@ def _assessment_cards(assessment: dict[str, Any]) -> None:
         )
 
 
-def _metric_details(metrics: list[dict[str, Any]], key_prefix: str) -> None:
+def _metric_details(
+    metrics: list[dict[str, Any]],
+    key_prefix: str,
+    branch: str,
+    absence_context: str | None = None,
+) -> None:
     for index, result in enumerate(metrics):
         name = str(result.get("name", ""))
         info = METRIC_INFO.get(name, {"title": name, "description": ""})
@@ -180,6 +201,16 @@ def _metric_details(metrics: list[dict[str, Any]], key_prefix: str) -> None:
                 st.progress(float(score))
             direction = "höher ist besser" if result.get("higher_is_better", True) else "kleiner ist kompakter/einfacher"
             st.caption(f"Messrichtung: {direction}. Status: {result.get('status', 'unbekannt')}.")
+            if st.toggle("Testverfahren und Datenlage aufklappen", key=f"{key_prefix}-{name}-{index}-method"):
+                method, data_status = explanation_for(name, branch, result, absence_context)
+                st.markdown(f"**So wurde getestet:** {method.procedure}")
+                st.markdown(f"**Berechnung:** {method.calculation}")
+                st.markdown(f"**Benötigte Daten:** {method.required}")
+                if state == "nicht messbar":
+                    st.warning(data_status)
+                else:
+                    st.info(data_status)
+                st.caption(f"Grenze der Aussagekraft: {method.limitation}")
             st.json(result.get("details", {}), expanded=False)
 
 
@@ -210,7 +241,7 @@ def _structure_diagnostics(structure: dict[str, Any]) -> None:
             {"Komponente": name, "Effekt auf die Logit-Differenz": value}
             for name, value in sorted(effects.items(), key=lambda item: abs(item[1]), reverse=True)
         ]
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width="stretch", hide_index=True)
     limitations = artifact.get("metadata", {}).get("limitations", [])
     if limitations:
         with st.expander("Grenzen der Strukturanalyse"):
@@ -241,21 +272,26 @@ def render_live_report(report: dict[str, Any]) -> None:
     tabs = st.tabs(tab_names)
     with tabs[0]:
         _assessment_cards(report["cot"]["assessment"])
-        _metric_details(report["cot"]["metrics"], "cot")
+        _metric_details(report["cot"]["metrics"], "cot", "cot")
     if report.get("structure"):
         with tabs[1]:
             assessment = report["structure"].get("assessment")
             if assessment:
                 _assessment_cards(assessment)
             _structure_diagnostics(report["structure"])
-            _metric_details(report["structure"]["metrics"], "structure")
+            _metric_details(
+                report["structure"]["metrics"],
+                "structure",
+                "structure",
+                report["structure"].get("note"),
+            )
 
     st.download_button(
         "Vollständigen Bericht als JSON herunterladen",
         data=json.dumps(report, ensure_ascii=False, indent=2),
         file_name="co12_bericht.json",
         mime="application/json",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -265,13 +301,13 @@ def render_artifact_report(report: dict[str, Any]) -> None:
     with tabs[0]:
         if report.get("cot"):
             _assessment_cards(report["cot"]["assessment"])
-            _metric_details(report["cot"]["metrics"], "upload-cot")
+            _metric_details(report["cot"]["metrics"], "upload-cot", "cot")
         else:
             st.info("Keine CoT-Artefakte hochgeladen.")
     with tabs[1]:
         if report.get("structure"):
             _assessment_cards(report["structure"]["assessment"])
-            _metric_details(report["structure"]["metrics"], "upload-structure")
+            _metric_details(report["structure"]["metrics"], "upload-structure", "structure")
         else:
             st.info("Keine Strukturartefakte hochgeladen.")
     st.download_button(
@@ -279,7 +315,7 @@ def render_artifact_report(report: dict[str, Any]) -> None:
         data=json.dumps(report, ensure_ascii=False, indent=2),
         file_name="co12_artefaktbericht.json",
         mime="application/json",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -316,7 +352,7 @@ def direct_analysis_tab() -> None:
         with constraint_columns[2]:
             forbidden_terms_text = st.text_input("Verbotene Begriffe")
 
-    if st.button("Antwort erzeugen und prüfen", type="primary", use_container_width=True):
+    if st.button("Antwort erzeugen und prüfen", type="primary", width="stretch"):
         if not prompt.strip():
             st.warning("Bitte zuerst einen Prompt eingeben.")
             return
@@ -349,9 +385,11 @@ def direct_analysis_tab() -> None:
         try:
             update_progress(0.01, "Modell wird geladen")
             service = load_model_service(
+                st.session_state["backend"],
                 st.session_state["model_name"],
                 st.session_state["max_new_tokens"],
                 st.session_state["device"],
+                st.session_state.get("lm_studio_url", DEFAULT_URL),
             )
             report = analyze_prompt(
                 service,
@@ -383,7 +421,7 @@ def artifact_tab() -> None:
         cot_file = st.file_uploader("CoT-Artefakte", type=["jsonl"], key="cot-upload")
     with columns[1]:
         structure_file = st.file_uploader("Strukturartefakte", type=["jsonl"], key="structure-upload")
-    if st.button("Artefakte auswerten", use_container_width=True):
+    if st.button("Artefakte auswerten", width="stretch"):
         if not cot_file and not structure_file:
             st.warning("Bitte mindestens eine JSONL-Datei auswählen.")
             return
@@ -397,6 +435,220 @@ def artifact_tab() -> None:
         render_artifact_report(report)
 
 
+def _benchmark_structure_absence(report: dict[str, Any]) -> str:
+    """Erklärt fehlende Strukturmessungen anhand des verwendeten Backends."""
+    if report.get("backend") == "lmstudio" or str(report.get("model", "")).startswith("google/gemma-4"):
+        return "LM Studio stellt für dieses GGUF-Modell keine internen Aktivierungen bereit."
+    if report.get("config", {}).get("run_structure"):
+        return "Für diesen Lauf wurden keine Strukturartefakte erzeugt; möglicherweise fehlten ein kontrafaktischer Prompt oder eine Alternativantwort."
+    return "Dieser Benchmarklauf wurde ohne Strukturanalyse ausgeführt."
+
+
+def render_benchmark_report(report: dict[str, Any]) -> None:
+    """Zeigt Accuracy, Co-12-Profile und jeden einzelnen Benchmarkfall."""
+    st.caption(
+        f"Gespeicherter Lauf: {report.get('dataset', 'unbekannter Datensatz')} · "
+        f"{report.get('model', 'unbekanntes Modell')} · {report.get('created_at', '')}"
+    )
+    first, second, third = st.columns(3)
+    first.metric("Bewertete Fälle", f"{report['evaluated_cases']} / {report['total_cases']}")
+    second.metric(
+        "Antwortgenauigkeit",
+        f"{report['accuracy']:.1%}" if report["accuracy"] is not None else "Nicht verfügbar",
+    )
+    third.metric("Korrekte Antworten", report["correct_answers"])
+    if report.get("benchmark_is_example_data"):
+        st.info("Dies sind zwei synthetische Beispielaufgaben. Die Ergebnisse sind kein allgemeiner Qualitätsnachweis.")
+    for field, label in (
+        ("context_condition", "Kontexttyp"),
+        ("question_polarity", "Fragepolarität"),
+    ):
+        groups = report.get("group_breakdown", {}).get(field, {})
+        if groups:
+            st.markdown(f"**Accuracy nach {label}:**")
+            st.dataframe(
+                [
+                    {
+                        label: name,
+                        "Fälle": stats["cases"],
+                        "Richtig": stats["correct"],
+                        "Accuracy": f"{stats['accuracy']:.1%}",
+                    }
+                    for name, stats in sorted(groups.items())
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+    evaluation = report.get("evaluation") or {}
+    cot_report = evaluation.get("cot") or missing_cot_evaluation()
+    structure_report = evaluation.get("structure") or missing_structure_evaluation()
+    st.subheader("Co-12-Ergebnisse über alle Fälle")
+    cot_tab, structure_tab = st.tabs(["CoT · 12 Cs", "Innere Modellstruktur · 12 Cs"])
+    with cot_tab:
+        _assessment_cards(cot_report["assessment"])
+        _metric_details(cot_report["metrics"], "benchmark-cot", "cot")
+    with structure_tab:
+        if not structure_report.get("examples"):
+            st.info(_benchmark_structure_absence(report))
+        _assessment_cards(structure_report["assessment"])
+        _metric_details(
+            structure_report["metrics"],
+            "benchmark-structure",
+            "structure",
+            _benchmark_structure_absence(report) if not structure_report.get("examples") else None,
+        )
+
+    st.subheader("Einzelne Benchmarkfälle")
+    for result in report["results"]:
+        label = "✓" if result.get("answer_matches_reference") is True else "✗"
+        if result.get("status") != "ok":
+            label = "–"
+        with st.expander(f"{label} {result['id']} · {result.get('status', 'unbekannt')}"):
+            st.markdown(f"**Aufgabe:** {result['prompt']}")
+            st.markdown(f"**Referenzantwort:** {result['expected_answer']}")
+            if error := result.get("error"):
+                st.error(error)
+                continue
+            st.markdown(f"**Modellantwort:** {result.get('answer') or 'Nicht extrahiert'}")
+            case_report = result.get("report", {})
+            case_cot = case_report.get("cot") or missing_cot_evaluation()
+            case_structure = case_report.get("structure") or missing_structure_evaluation()
+            cot_case_tab, structure_case_tab = st.tabs(["CoT · 12 Cs", "Innere Modellstruktur · 12 Cs"])
+            with cot_case_tab:
+                _metric_details(case_cot["metrics"], f"{result['id']}-cot", "cot")
+            with structure_case_tab:
+                if note := case_structure.get("note"):
+                    st.info(note)
+                elif not case_structure.get("artifact"):
+                    st.info("Für diesen Fall wurden keine internen Modellaktivierungen gemessen.")
+                _metric_details(
+                    case_structure["metrics"],
+                    f"{result['id']}-structure",
+                    "structure",
+                    case_structure.get("note") or (
+                        _benchmark_structure_absence(report) if not case_structure.get("artifact") else None
+                    ),
+                )
+
+    st.download_button(
+        "Benchmarkbericht herunterladen",
+        data=json.dumps(report, ensure_ascii=False, indent=2),
+        file_name="co12_benchmark.json",
+        mime="application/json",
+        width="stretch",
+    )
+
+
+def benchmark_tab() -> None:
+    st.markdown('<div class="eyebrow">Benchmarks im Browser</div>', unsafe_allow_html=True)
+    st.title("Benchmark starten und vergleichen")
+    st.markdown(
+        "Wähle den Beispieldatensatz, BBQ / Gender_identity oder lade eigene Fälle "
+        "im Schema aus `data/README.md` hoch. "
+        "Der Benchmark erzeugt echte Modellantworten und die passenden CoT-Artefakte."
+    )
+    selected_dataset = st.selectbox(
+        "Benchmark-Datensatz",
+        options=["Synthetische Beispiele (2)", "BBQ: Gender_identity (5.672)"],
+        key="benchmark_dataset",
+    )
+    uploaded = st.file_uploader("Eigene Benchmarkfälle (JSONL)", type=["jsonl"], key="benchmark-upload")
+    if not uploaded and selected_dataset.startswith("BBQ") and not BBQ_PATH.is_file():
+        st.info("Der BBQ-Datensatz wurde hier noch nicht gespeichert.")
+        if st.button("BBQ / Gender_identity jetzt herunterladen"):
+            try:
+                with st.spinner("5.672 Testfälle von Hugging Face herunterladen"):
+                    path, count = download_bbq()
+                st.success(f"{count} Testfälle geladen: {path}")
+                st.rerun()
+            except (OSError, RuntimeError, ValueError) as exc:
+                st.error(str(exc))
+        return
+    try:
+        raw_cases = (
+            _read_uploaded_jsonl(uploaded)
+            if uploaded
+            else read_jsonl(BBQ_PATH if selected_dataset.startswith("BBQ") else ROOT / "data" / "sample_benchmark.jsonl")
+        )
+        cases = [BenchmarkCase.from_dict(item) for item in raw_cases]
+        if not cases or any(not item.id or not item.prompt or not item.expected_answer for item in cases):
+            raise ValueError("Jeder Benchmarkfall benötigt id, prompt und expected_answer.")
+    except (OSError, ValueError, TypeError) as exc:
+        st.error(str(exc))
+        return
+
+    if not uploaded and selected_dataset.startswith("BBQ"):
+        condition = st.selectbox(
+            "BBQ-Kontexttyp",
+            options=["Alle", "Mehrdeutig (ambig)", "Eindeutig (disambig)"],
+        )
+        if condition != "Alle":
+            expected_condition = "ambig" if "(ambig)" in condition else "disambig"
+            cases = [case for case in cases if case.metadata.get("context_condition") == expected_condition]
+        st.caption("Antworten werden als A/B/C bewertet. Quelle: heegyu/bbq, Testsplit; keine Gold-Begründungsschritte vorhanden.")
+
+    limit = st.number_input("Anzahl Fälle", min_value=1, max_value=len(cases), value=min(4, len(cases)))
+    st.caption(f"{len(cases)} Fälle vorhanden. Die Auswertung benötigt mehrere Modellaufrufe pro Fall.")
+
+    if st.button("Benchmark jetzt starten", type="primary", width="stretch"):
+        if st.session_state["backend"] == "LM Studio" and st.session_state.get("struktur", False):
+            st.info("GGUF-Modelle über LM Studio liefern keine internen Aktivierungen. Die Strukturmetriken bleiben nicht messbar.")
+        progress_bar = st.progress(0.0)
+        progress_text = st.empty()
+
+        def update_progress(value: float, message: str) -> None:
+            progress_bar.progress(value)
+            progress_text.caption(message)
+
+        try:
+            service = load_model_service(
+                st.session_state["backend"],
+                st.session_state["model_name"],
+                st.session_state["max_new_tokens"],
+                st.session_state["device"],
+                st.session_state.get("lm_studio_url", DEFAULT_URL),
+            )
+            config = AnalysisConfig(
+                mode=st.session_state["analysemodus"],
+                samples=st.session_state["samples"],
+                temperature=st.session_state["temperature"],
+                seed=st.session_state["seed"],
+                run_structure=st.session_state["struktur"] and st.session_state["backend"] != "LM Studio",
+                structure_top_k=st.session_state["top_k"],
+            )
+            report = run_benchmark(
+                service,
+                cases[: int(limit)],
+                config,
+                st.session_state["model_name"],
+                update_progress,
+            )
+            paths = save_benchmark(report, ROOT / "data" / "results")
+            st.session_state["benchmark_report"] = report
+            st.success(f"Benchmark gespeichert: {paths[0].name} und {paths[1].name}")
+        except Exception as exc:
+            st.exception(exc)
+        finally:
+            progress_bar.empty()
+            progress_text.empty()
+
+    saved = sorted((ROOT / "data" / "results").glob("benchmark_*.json"), reverse=True)
+    if saved:
+        selected = st.selectbox(
+            "Gespeicherten Benchmarkbericht anzeigen",
+            options=[None, *saved],
+            index=1 if "benchmark_report" not in st.session_state else 0,
+            format_func=lambda path: "Aktueller Lauf" if path is None else path.name,
+        )
+        if selected is not None:
+            try:
+                st.session_state["benchmark_report"] = load_benchmark(selected)
+            except (OSError, ValueError) as exc:
+                st.error(f"Bericht konnte nicht gelesen werden: {exc}")
+    if report := st.session_state.get("benchmark_report"):
+        render_benchmark_report(report)
+
+
 def methods_tab() -> None:
     st.markdown('<div class="eyebrow">Methodische Grundlage</div>', unsafe_allow_html=True)
     content = (ROOT / "CO12_METHODEN.md").read_text(encoding="utf-8")
@@ -405,8 +657,22 @@ def methods_tab() -> None:
 
 with st.sidebar:
     st.markdown("## Versuchsaufbau")
-    st.text_input("Hugging-Face-Modell", value="Qwen/Qwen2.5-1.5B-Instruct", key="model_name")
-    st.selectbox("Gerät", options=["auto", "cpu", "cuda"], key="device")
+    st.selectbox("Modellanbindung", options=["LM Studio", "Hugging Face"], key="backend")
+    if st.session_state["backend"] == "LM Studio":
+        st.text_input("LM-Studio-Server", value=DEFAULT_URL, key="lm_studio_url")
+        try:
+            local_models = [name for name in available_models(st.session_state["lm_studio_url"]) if "embedding" not in name.casefold()]
+        except (OSError, ValueError) as exc:
+            local_models = [DEFAULT_MODEL, "qwen3.8-27b"]
+            st.warning(f"LM Studio nicht erreichbar: {exc}")
+        choices = list(dict.fromkeys([DEFAULT_MODEL, *local_models]))
+        st.selectbox("Lokales LM-Studio-Modell", options=choices, key="lm_model_name")
+        st.session_state["model_name"] = st.session_state["lm_model_name"]
+        st.caption("Gemma 4 26B A4B und Qwen 3.8 können hier umgeschaltet werden.")
+    else:
+        st.text_input("Hugging-Face-Modell", value="Qwen/Qwen2.5-1.5B-Instruct", key="hf_model_name")
+        st.session_state["model_name"] = st.session_state["hf_model_name"]
+    st.selectbox("Gerät (nur Hugging Face)", options=["auto", "cpu", "cuda"], key="device", disabled=st.session_state["backend"] == "LM Studio")
     selected_mode = st.radio(
         "Analysemodus",
         options=["Schnell", "Vollständig"],
@@ -424,16 +690,21 @@ with st.sidebar:
         value=False,
         key="struktur",
         help="Benötigt Alternativantwort und kontrafaktischen Prompt; führt viele zusätzliche Forward-Pässe aus.",
+        disabled=st.session_state["backend"] == "LM Studio",
     )
     st.slider("Anzahl relevanter Layer", min_value=1, max_value=20, value=5, key="top_k", disabled=not st.session_state.get("struktur", False))
+    if st.session_state["backend"] == "LM Studio":
+        st.caption("LM Studio stellt für GGUF-Modelle keine internen Aktivierungen bereit; strukturelle Co-12-Messungen sind hier nicht möglich.")
     st.caption("Lokale Verarbeitung: Prompts werden nicht an einen externen API-Anbieter gesendet.")
 
 
-direct_tab, upload_tab, documentation_tab = st.tabs(
-    ["Prompt analysieren", "Artefakte auswerten", "Methoden und Quellen"]
+direct_tab, benchmark_view, upload_tab, documentation_tab = st.tabs(
+    ["Prompt analysieren", "Benchmark starten", "Artefakte auswerten", "Methoden und Quellen"]
 )
 with direct_tab:
     direct_analysis_tab()
+with benchmark_view:
+    benchmark_tab()
 with upload_tab:
     artifact_tab()
 with documentation_tab:

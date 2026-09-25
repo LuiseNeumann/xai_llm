@@ -46,6 +46,7 @@ checkpoints/
 data/raw/
 data/downloads/
 data/cache/
+data/results/
 
 # Lokal erzeugte Auswertungsartefakte
 /cot_results.json

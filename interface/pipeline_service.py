@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from itertools import combinations
+import re
 from typing import Any, Protocol
 
 from common.metrics import mean, token_f1
@@ -77,7 +78,9 @@ def _notify(callback: ProgressCallback | None, progress: float, message: str) ->
 
 
 def _normal_answer(value: Any) -> str:
-    return str(value).strip().casefold()
+    answer = str(value).strip().casefold()
+    option = re.fullmatch(r"\(?([abc])\)?[.!]?", answer)
+    return option.group(1) if option else answer
 
 
 def _trace_text(trace: dict[str, Any]) -> str:
@@ -107,6 +110,56 @@ def _constraints(request: AnalysisRequest) -> dict[str, Any]:
     if request.forbidden_terms:
         constraints["forbidden_terms"] = request.forbidden_terms
     return constraints
+
+
+def _constraint_prompt(prompt: str, constraints: dict[str, Any]) -> str:
+    instructions = []
+    if "max_steps" in constraints:
+        instructions.append(f"Verwende höchstens {constraints['max_steps']} Begründungsschritte.")
+    if constraints.get("required_terms"):
+        instructions.append(
+            "Benutze in der Begründung ausdrücklich diese Begriffe: "
+            + ", ".join(constraints["required_terms"])
+            + "."
+        )
+    if constraints.get("forbidden_terms"):
+        instructions.append(
+            "Benutze in der Begründung diese Begriffe nicht: "
+            + ", ".join(constraints["forbidden_terms"])
+            + "."
+        )
+    return prompt + "\n\nDarstellungsvorgaben: " + " ".join(instructions)
+
+
+def evaluate_live_cot(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Kennzeichnet nicht validierte Textähnlichkeits-Proxys als diagnostisch."""
+    metrics = [result.to_dict() for result in evaluate_cot(records)]
+    for metric in metrics:
+        if metric["status"] != "ok":
+            continue
+        name = metric["name"]
+        if name in {"completeness", "continuity", "coherence", "composition"}:
+            metric["details"]["assessment_eligible"] = False
+            metric["details"]["assessment_reason"] = (
+                "Lexikalische Übereinstimmung bzw. einfache Formregeln messen keine "
+                "sprachübergreifende oder kausale Erklärungstreue."
+            )
+        if name == "correctness" and not any(
+            intervention.get("expected_answer_change") is True
+            for record in records
+            for intervention in record.get("interventions", [])
+        ):
+            metric["details"]["assessment_eligible"] = False
+            metric["details"]["assessment_reason"] = (
+                "Nur irrelevante Änderungen wurden getestet; ein kausaler Gegentest fehlt."
+            )
+        if name == "consistency":
+            metric["details"]["assessment_eligible"] = False
+            metric["details"]["assessment_reason"] = (
+                "Der Textähnlichkeitsanteil kann sinnverwandte Begründungen unterschätzen; "
+                "die Antwortstabilität steht separat unter den Details."
+            )
+    return metrics
 
 
 def _wrapper_prompts(prompt: str, full_mode: bool) -> list[str]:
@@ -215,6 +268,13 @@ def collect_live_cot(
             **contrast,
             "expected_answer": request.alternative_answer,
         }
+    if artifact["constraints"]:
+        _notify(progress, 0.76, "Controllability wird mit Vorgaben geprüft")
+        artifact["controlled_trace"] = generator.generate(
+            _constraint_prompt(request.prompt, artifact["constraints"]),
+            config.seed + 400,
+            temperature=0.0,
+        )
     return artifact
 
 
@@ -276,7 +336,7 @@ def analyze_prompt(
 ) -> dict[str, Any]:
     """Führt die Live-Analyse aus und gibt einen vollständig serialisierbaren Bericht zurück."""
     cot_artifact = collect_live_cot(model_service, request, config, progress)
-    cot_metrics = [result.to_dict() for result in evaluate_cot([cot_artifact])]
+    cot_metrics = evaluate_live_cot([cot_artifact])
     answer = str(cot_artifact.get("answer", ""))
     answer_match = (
         _normal_answer(answer) == _normal_answer(request.expected_answer)

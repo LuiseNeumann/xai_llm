@@ -19,6 +19,7 @@ from common.models import BenchmarkCase
 
 SYSTEM_INSTRUCTION = """Löse die Aufgabe und gib ausschließlich JSON in diesem Schema zurück:
 {"steps": ["kurzer Begründungsschritt"], "answer": "endgültige Antwort", "step_confidences": [0.0]}
+Jeder Eintrag in steps muss ein vollständiger Satz als String sein, kein Objekt und keine Nummer.
 Gib für jeden Schritt genau eine Konfidenz in [0, 1] an. Verwende keine Markdown-Codeblöcke."""
 
 
@@ -33,11 +34,22 @@ def _extract_json(text: str) -> dict[str, Any]:
     steps = value.get("steps", [])
     if not isinstance(steps, list):
         steps = [str(steps)]
+    cleaned_steps: list[str] = []
+    for step in steps:
+        if isinstance(step, str) and step.strip():
+            cleaned_steps.append(step)
+        elif isinstance(step, dict):
+            text = next(
+                (step[key] for key in ("explanation", "reasoning", "text", "content") if isinstance(step.get(key), str)),
+                "",
+            )
+            if text.strip():
+                cleaned_steps.append(text)
     confidences = value.get("step_confidences", [])
     if not isinstance(confidences, list):
         confidences = []
     return {
-        "steps": [str(step) for step in steps],
+        "steps": cleaned_steps,
         "answer": str(value.get("answer", "")),
         "step_confidences": confidences,
     }
@@ -108,7 +120,8 @@ class HuggingFaceGenerator:
         with self.torch.inference_mode():
             output = self.model.generate(**inputs, **kwargs)
         generated = output[0, inputs["input_ids"].shape[1] :]
-        return _extract_json(self.tokenizer.decode(generated, skip_special_tokens=True))
+        raw_text = self.tokenizer.decode(generated, skip_special_tokens=True)
+        return {**_extract_json(raw_text), "raw_text": raw_text}
 
 
 def collect_case(

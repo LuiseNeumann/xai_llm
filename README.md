@@ -71,17 +71,30 @@ bekannter Referenzstruktur wie Tracr validiert werden.
 
 ## Interaktive Oberfläche
 
-Die UI-Abhängigkeiten installieren und das lokale Prüflabor starten:
+Für die lokal in LM Studio vorhandene Gemma-4-26B-A4B-GGUF-Datei die
+UI-Abhängigkeiten installieren und das Prüflabor starten:
 
 ```bash
-python3 -m pip install -e '.[ui]'
-streamlit run interface/app.py
+uv sync --extra ui
+lms load google/gemma-4-26b-a4b --gpu 0.6 -c 4096 -y
+lms server start
+uv run streamlit run interface/app.py
 ```
 
-Die Oberfläche verwendet standardmäßig `Qwen/Qwen2.5-1.5B-Instruct`, bietet
-einen Schnell- und einen vollständigen Modus und zeigt alle Co-12-Ergebnisse
-einzeln aufklappbar an. Details und Einschränkungen stehen in
-`interface/README.md`.
+Die Befehle stehen auch in `QUICKSTART.md`. Die Oberfläche verwendet
+standardmäßig LM Studio und `google/gemma-4-26b-a4b` auf
+`http://127.0.0.1:1234/v1`. Alternativ ist `qwen3.8-27b` auswählbar.
+Benchmarks können unter **Benchmark starten** direkt ausgeführt oder über
+`uv run python -m interface.run_benchmark` erzeugt werden. Die gespeicherten
+Ergebnisse unter `data/results/` sind im UI erneut abrufbar. Details stehen
+in `interface/README.md`.
+
+Als echter Datensatz ist `heegyu/bbq` / `Gender_identity` mit 5.672 Fällen
+auswählbar. Das UI lädt ihn bei Bedarf herunter; alternativ:
+
+```bash
+uv run python -m interface.download_bbq
+```
 
 ## Empfohlener Ablauf
 

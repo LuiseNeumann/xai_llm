@@ -23,6 +23,30 @@ Heruntergeladene echte Benchmarks sollten ebenfalls unter `data/` liegen. Sie
 sind in diesen Vorlagen nicht enthalten, da sich Lizenzen und Vorverarbeitung
 unterscheiden.
 
+## BBQ: Gender_identity
+
+Der reale Benchmark `heegyu/bbq` / `Gender_identity` kann in Streamlit unter
+**Benchmark starten** gewählt oder mit folgendem Befehl lokal geladen werden:
+
+```bash
+uv run python -m interface.download_bbq
+```
+
+Die 5.672 Testfälle werden als
+`data/downloads/bbq_gender_identity.jsonl` gespeichert. Das Dataset steht auf
+Hugging Face unter [heegyu/bbq](https://huggingface.co/datasets/heegyu/bbq)
+mit der Lizenz CC BY 4.0. Das ältere Dataset-Skript benötigt `datasets<4`;
+der Downloader ruft `load_dataset("heegyu/bbq", "Gender_identity",
+trust_remote_code=True)` auf. Der lokale Download wird nicht ins Git-Repository
+aufgenommen.
+
+Jede Frage enthält drei Antwortoptionen `(A)` bis `(C)`. Das numerische
+Original-Label wird exakt auf den jeweiligen Buchstaben abgebildet. Unter
+`metadata` bleiben Original-Label, Optionen, Kontexttyp (`ambig`/`disambig`),
+Fragepolarität und weitere BBQ-Informationen erhalten. Der Benchmark enthält
+keine Referenz-Begründungsschritte; entsprechende Co-12-Metriken sind daher
+nicht belastbar verfügbar.
+
 ## CoT-Artefakte
 
 `sample_cot_artifacts.jsonl` speichert erzeugte Reasoning-Verläufe und

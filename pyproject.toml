@@ -15,8 +15,13 @@ hf = [
   "transformers>=4.44",
 ]
 ui = [
+  "datasets>=3.0,<4",
+  "streamlit>=1.55",
+]
+ui-hf = [
   "accelerate>=0.33",
-  "streamlit>=1.38",
+  "datasets>=3.0,<4",
+  "streamlit>=1.55",
   "torch>=2.1",
   "transformers>=4.44",
 ]
