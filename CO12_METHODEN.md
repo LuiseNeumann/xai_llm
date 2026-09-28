@@ -34,6 +34,18 @@ kohärente Erklärung kann trotzdem kausal untreu sein.
 | **Coherence** | CoT mit menschlichen Rationales, Goldbeweisen und externen Fakten vergleichen. | Rationale-F1, Fact Precision, NLI-Entailment, Widerspruchsrate und ROSCOE-Factuality. | ERASER, e-SNLI, EntailmentBank | DeYoung et al.; Golovneva et al. |
 | **Controllability** | Anforderungen wie maximale Schrittzahl, Detailniveau und ein- oder auszuschließende Fakten variieren. | Constraint-Satisfaction-Rate, gewünschte Konzeptabdeckung und Erhalt der Antwortqualität. | Kontrollierte EntailmentBank- oder GSM8K-Varianten | Nauta et al.; Adaption |
 
+### Adaption-Erklärung
+
+Adaption von Completeness (ERASER / EntailmentBank) | Statt einzelne Bildpixel abzudecken (Pixel Masking) werden bei CoT einzelne Sätze oder Rationales im Text-Prompt maskiert oder entfernt, um zu messen, wie sich die Modellgenauigkeit verändert (Sufficiency / Comprehensiveness). Bei logischen Aufgaben werden CoTs in explizite Beweisbäume (Entailment Trees) zerlegt
+
+Adaption von Consistency (Wang et al. / Self-Consistency) | In der klassischen XAI prüft Konsistenz, ob identische Eingaben zu identischen Feature-Importances führen. Für CoT adaptieren Wang et al. dies, indem sie über stochastisches Decoding (Temperatur > 0) mehrere Denkpdate samplen und prüfen, wie stabil die finale Antwort über unterschiedliche semantische Erklärungswege hinweg bleibt 
+
+Adaption von Continuity (Lanham et al.) | Klassische Kontinuität verlangt, dass geringfügiges Rauschen in Eingabevektoren die Erklärung nicht drastisch verändert. Bei CoT adaptiert Lanham et al. diesen Test durch Paraphrasierung von Denkschritten. Bleibt die Antwort unter verschiedenen Satzformulierungen stabil, ist die logische Substanz entscheidend und nicht ein versteckter Oberflächen-Bias
+
+Adaption von Covariate Complexity (Dalvi et al.) | Statt Monotonie oder Feature-Interaktionen in Tabellendaten zu messen, wird die Textkette als gerichteter azyklischer Graph (DAG) modelliert. Die Komplexität wird nun über graphentheoretische Kennzahlen wie Fan-in, Tiefe und Pfadlängen der logischen Schlüsse berechnet.
+
+Adaption von Confidence (Lin et al. / CalibratedMath) | Anstelle von mathematischen Softmax-Entropiewerten der Modell-Logits zeigt Lin et al., dass Modelle lernen können, ihre Unsicherheit direkt in natürlichen Zahlen oder Wörtern im Textausgabe-Strom auszudrücken (verbalized probability), was mittels Kalibrierungsmetriken (Brier Score, ECE) evaluiert wird
+
 ## Co-12 für die innere Modellstruktur
 
 Als einheitliches Erklärungsobjekt wird ein **sparse causal circuit** verwendet:
