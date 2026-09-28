@@ -67,6 +67,20 @@ postulierten kausalen Informationsfluss.
 | **Coherence** | Interne Features gegen menschlich verständliche Konzeptlabels testen. | Konzept-Purity, Precision/Recall der Aktivierungsbeispiele und Übereinstimmung vorhergesagter mit tatsächlicher Aktivierung. | Kontrollierte Konzeptdaten, IOI-Rollen | Bau et al.; Cunningham et al. |
 | **Controllability** | Erklärte Features gezielt aktivieren, ablatieren oder editieren. | Edit Success, Generalisierung, Spezifität, Locality und Nebenwirkungsrate. | CounterFact, zsRE, IOI | Meng et al.; Marks et al.; etabliert |
 
+### Erklärung Adaption 
+Adaption von Correctness & Completeness (Causal Patching statt Input-Maskierung): Klassisch: Entfernen/Maskieren von Eingabepixeln oder Wörtern.MI-Adaption: Activation Patching. Aktivierungsvektoren aus einem Run mit sauberem Input (Clean) werden in einen Run mit verfälschtem Input (Counterfactual) injiziert. 
+
+Vollständigkeit wird nicht mehr über Textabdeckung definiert, sondern dadurch, dass der ablatierte Circuit $C \setminus K$ exakt denselben Performanceabfall zeigt wie das Gesamtmodell $M \setminus K$4.
+
+Adaption von Covariate Complexity (Auflösung von Superposition via SAEs):Klassisch: Reduktion der Anzahl der Input-Features oder Vermeidung komplexer Nichtlinearitäten.MI-Adaption: Sparse Autoencoder (SAE). Da einzelne Neuronen in Sprachmodellen oft polysemantisch sind (mehrere unzusammenhängende Konzepte überlagern / Superposition), adaptiert MI das Komplexitätskriterium, indem interne Aktivierungen in ein spärliches ($L_0$), monosemantisches Feature-Format überführt werden
+
+Adaption von Compactness (ACDC & Sparsity-Pareto-Kurven):Klassisch: Zählen von Regeln in Entscheidungsbäumen oder Pfadlängen.MI-Adaption: Automated Circuit Discovery (ACDC). Kompaktheit wird als die minimale Anzahl aktiver Kanten und Knoten im Rechengraphen eines Transformers gemessen, die notwendig ist, um eine hohe Faithfulness aufrechtzuerhalten
+
+Adaption von Consistency (CKA & Tracr Ground Truth):Klassisch: Determinismus von Erklärungsalgorithmen bei identischem Input.MI-Adaption: Vergleiche der extrahierten Schaltkreise über verschiedene Modell-Checkpoints hinweg mittels Centered Kernel Alignment (CKA) oder die Validierung gefundener Circuits gegen mathematisch garantierte Ziel-Circuits in kompilierten Transformern (Tracr)
+
+Adaption von Controllability (Model Editing & Feature Steering):Klassisch: Interaktive Benutzeroberflächen, bei denen Anwender Regelschwellenwerte anpassen können.MI-Adaption: Chirurgisches Modell-Editing und Feature-Pruning. Die Erklärungssteuerung wird zu einer aktiven Intervention im Modell: Mit ROME werden Gewichte im MLP direkt editiert, mit SHIFT werden nicht-relevante SAE-Features ablatiert, um die Modell-Generalisierung gezielt zu verbessern
+
+
 ## Empfohlenes Benchmark-Design
 
 | Stufe | Benchmarks | Zweck |
